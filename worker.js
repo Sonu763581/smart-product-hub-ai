@@ -217,6 +217,7 @@ async function fetchWithRetryAndTimeout(
     );
   }
         }
+    }
   async function getGoogleAccessToken(env) {
   const tokenUrl = "https://oauth2.googleapis.com/token";
 
