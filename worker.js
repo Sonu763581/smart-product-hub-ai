@@ -216,8 +216,7 @@ async function fetchWithRetryAndTimeout(
       setTimeout(resolve, backoff * Math.pow(2, attempt))
     );
   }
-        }
-    }
+}
   async function getGoogleAccessToken(env) {
   const tokenUrl = "https://oauth2.googleapis.com/token";
 
@@ -258,7 +257,7 @@ async function fetchWithRetryAndTimeout(
   }
 
   return data.access_token.trim();
-    }
+}
   async function generateArticleWithGemini(env, userTitle, userPrompt) {
   const endpoint =
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(
@@ -333,7 +332,7 @@ Output MUST be a single raw valid JSON object with the following structure:
     throw new Error(
       "Gemini API returned an empty or invalid content candidate"
     );
-    }
+  }
       try {
     const parsed = JSON.parse(cleanJsonResponse(rawText));
 
@@ -407,7 +406,7 @@ Output MUST be a single raw valid JSON object with the following structure:
     );
   }
 }
-function cleanJsonResponse(text) {
+  function cleanJsonResponse(text) {
   let cleaned = text.trim();
 
   if (cleaned.startsWith("```json")) {
@@ -486,7 +485,7 @@ function validateHtmlQuality(html) {
     );
   }
 }
-function sanitizeSlug(text) {
+  function sanitizeSlug(text) {
   return text
     .toLowerCase()
     .replace(/[^a-z0-9\s-]/g, "")
@@ -549,8 +548,8 @@ async function executeBloggerOperation(
     throw new Error(
       `Blogger API Error [${response.status}]: ${errorMessage} ${details}`.trim()
     );
-}
-  // Validate Blogger API response payload
+  }
+    // Validate Blogger API response payload
   if (!data.id || typeof data.id !== "string") {
     throw new Error(
       "Blogger API returned a response missing a valid 'id'"
@@ -574,6 +573,5 @@ async function executeBloggerOperation(
     url: data.url,
     postId: data.id
   };
-      }
 }
-
+  
