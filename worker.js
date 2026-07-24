@@ -1,581 +1,223 @@
+/**
+ * Production-Ready Cloudflare Worker: Gemini to Blogger Publisher
+ * 
+ * Securely handles CORS preflight, exchanges Google OAuth2 refresh tokens,
+ * forces Gemini 1.5 Flash to output structured JSON with HTML bodies, 
+ * and publishes directly to the Google Blogger API.
+ */
+
 export default {
-  async fetch(request, env) {
-    // Handle CORS preflight request
+  async fetch(request, env, ctx) {
+    // 1. Handle CORS Preflight and Header Operations
+    const corsHeaders = {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Methods": "POST, OPTIONS",
+      "Access-Control-Allow-Headers": "Content-Type",
+      "Access-Control-Max-Age": "86400",
+    };
+
     if (request.method === "OPTIONS") {
-      return handleCorsPreflight();
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders
+      });
     }
 
+    // Only allow POST requests for execution
     if (request.method !== "POST") {
-      return createJsonResponse(
-        {
-          success: false,
-          error: "Only POST method is allowed"
-        },
-        405
-      );
-    }
-
-    let payload;
-
-    try {
-      payload = await request.json();
-    } catch (e) {
-      return createJsonResponse(
-        {
-          success: false,
-          error: "Invalid JSON payload in request body"
-        },
-        400
-      );
-    }
-
-    const { title, prompt, mode = "publish", postId } = payload;
-
-    if (!prompt || typeof prompt !== "string" || !prompt.trim()) {
-      return createJsonResponse(
-        {
-          success: false,
-          error: "Field 'prompt' is required and must be a non-empty string"
-        },
-        400
-      );
-    }
-
-    if (mode !== "publish" && mode !== "update") {
-      return createJsonResponse(
-        {
-          success: false,
-          error: "Field 'mode' must be either 'publish' or 'update'"
-        },
-        400
-      );
-    }
-
-    if (
-      mode === "update" &&
-      (!postId || typeof postId !== "string" || !postId.trim())
-    ) {
-      return createJsonResponse(
-        {
-          success: false,
-          error: "Field 'postId' is required when mode is 'update'"
-        },
-        400
-      );
-    }
-
-    const missingEnv = checkMissingEnvVars(env);
-
-    if (missingEnv.length > 0) {
-      return createJsonResponse(
-        {
-          success: false,
-          error: `Missing environment variables: ${missingEnv.join(", ")}`
-        },
-        500
-      );
+      return new Response(JSON.stringify({ error: "Method Not Allowed. Use POST." }), {
+        status: 405,
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+      });
     }
 
     try {
-      const accessToken = await getGoogleAccessToken(env);
+      // 2. Validate Infrastructure Environment Configurations
+      validateEnvironment(env);
 
-      const articleData = await generateArticleWithGemini(
-        env,
-        title,
-        prompt
+      // 3. Extract and Process Payload
+      let payload;
+      try {
+        payload = await request.json();
+      } catch (e) {
+        return new Response(JSON.stringify({ error: "Invalid JSON format in request body." }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+
+      const { topic } = payload;
+      if (!topic || typeof topic !== "string" || topic.trim() === "") {
+        return new Response(JSON.stringify({ error: "Missing required string parameter: 'topic'" }), {
+          status: 400,
+          headers: { "Content-Type": "application/json", ...corsHeaders }
+        });
+      }
+
+      // 4. Generate Semantic HTML Article using Gemini API
+      const article = await generateGeminiArticle(topic.trim(), env.GEMINI_API_KEY);
+
+      // 5. Rotate Google OAuth Credentials to get Access Token
+      const accessToken = await getGoogleAccessToken(
+        env.GOOGLE_CLIENT_ID, 
+        env.GOOGLE_CLIENT_SECRET, 
+        env.GOOGLE_REFRESH_TOKEN
       );
 
-      const bloggerResult = await executeBloggerOperation(
-        env,
-        accessToken,
-        articleData,
-        mode,
-        postId
+      // 6. Transmit Document Payload to Google Blogger Service
+      const bloggerData = await publishToBlogger(
+        env.BLOGGER_BLOG_ID, 
+        accessToken, 
+        article.title, 
+        article.content
       );
 
-      return createJsonResponse(
-        {
-          success: true,
-          title: bloggerResult.title,
-          url: bloggerResult.url,
-          postId: bloggerResult.postId
-        },
-        200
-      );
+      // 7. Standard Success Transmission
+      return new Response(JSON.stringify({
+        success: true,
+        message: "Article processed and published successfully.",
+        postId: bloggerData.id,
+        url: bloggerData.url,
+        title: article.title
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+      });
+
     } catch (error) {
-      return createJsonResponse(
-        {
-          success: false,
-          error: error.message || "An unexpected internal server error occurred"
-        },
-        500
-      );
+      // Systemic Exception Containment and Auditing
+      console.error("Critical Worker Exception:", error.message);
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: error.message || "Internal Server Error during pipeline execution." 
+      }), {
+        status: 500,
+        headers: { "Content-Type": "application/json", ...corsHeaders }
+      });
     }
   }
 };
 
-function handleCorsPreflight() {
-  return new Response(null, {
-    status: 204,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization",
-      "Access-Control-Max-Age": "86400"
-    }
-  });
-}
-
-function checkMissingEnvVars(env) {
-  const required = [
-    "CLIENT_ID",
-    "CLIENT_SECRET",
-    "BLOGGER_REFRESH_TOKEN",
-    "GEMINI_API_KEY",
-    "BLOG_ID"
+/**
+ * Validates existence of critical production credentials within core bindings.
+ */
+function validateEnvironment(env) {
+  const requirements = [
+    "GEMINI_API_KEY", 
+    "GOOGLE_CLIENT_ID", 
+    "GOOGLE_CLIENT_SECRET", 
+    "GOOGLE_REFRESH_TOKEN", 
+    "BLOGGER_BLOG_ID"
   ];
-
-  const missing = [];
-
-  for (const key of required) {
-    if (!env[key] || typeof env[key] !== "string" || !env[key].trim()) {
-      missing.push(key);
+  for (const requirement of requirements) {
+    if (!env[requirement] || env[requirement].trim() === "") {
+      throw new Error(`Runtime configuration error: Missing required binding [${requirement}]`);
     }
   }
-
-  return missing;
 }
 
-function createJsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json; charset=UTF-8",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization"
-    }
-  });
-}
+/**
+ * Commands the Gemini Engine to construct clean semantic structural HTML inside JSON.
+ */
+async function generateGeminiArticle(topic, apiKey) {
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  
+  const instruction = `Write an extensive, professional, SEO-optimized blog article focused on "${topic}". 
+  You must output your complete response in raw JSON format exactly following this layout schema structure:
+  {
+    "title": "An engaging, keyword-rich title for the blog post",
+    "content": "Provide the extensive blog body here wrapped purely inside valid semantic HTML strings using elements like <p>, <h2>, <h3>, <ul>, <ol>, <li>, <strong>, <em>. Do NOT include generic markdown formatting code blocks like \\\`\\\`\\\`html, do NOT wrap with outer structural tags like <html>, <head>, or <body>. Provide only structural semantic body markup."
+  }`;
 
-async function fetchWithRetryAndTimeout(
-  url,
-  options = {},
-  retries = 2,
-  backoff = 1000,
-  timeoutMs = 25000
-) {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const controller = new AbortController();
-
-    const timeoutId = setTimeout(() => {
-      controller.abort();
-    }, timeoutMs);
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        signal: controller.signal
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.ok) {
-        return response;
+  const requestOptions = {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: instruction }] }],
+      generationConfig: {
+        responseMimeType: "application/json",
+        temperature: 0.7
       }
+    })
+  };
 
-      // Do NOT retry authentication failures, client errors,
-      // or resource errors (400-499 except 429)
-      if (
-        response.status >= 400 &&
-        response.status < 500 &&
-        response.status !== 429
-      ) {
-        return response;
-      }
+  const response = await fetch(endpoint, requestOptions);
+  if (!response.ok) {
+    const errorDetails = await response.text();
+    throw new Error(`Gemini Interface Generation failure (Status ${response.status}): ${errorDetails}`);
+  }
 
-      if (attempt === retries) {
-        return response;
-      }
-    } catch (err) {
-      clearTimeout(timeoutId);
+  const payloadData = await response.json();
+  
+  if (!payloadData.candidates || !payloadData.candidates[0] || !payloadData.candidates[0].content || !payloadData.candidates[0].content.parts || !payloadData.candidates[0].content.parts[0] || !payloadData.candidates[0].content.parts[0].text) {
+    throw new Error("Malformed payload hierarchy received from Gemini upstream endpoint.");
+  }
 
-      if (attempt === retries) {
-        if (err.name === "AbortError") {
-          throw new Error(
-            `Network request timed out after ${timeoutMs}ms`
-          );
-        }
-
-        throw err;
-      }
-    }
-
-    await new Promise((resolve) =>
-      setTimeout(resolve, backoff * Math.pow(2, attempt))
-    );
+  const rawJsonOutput = payloadData.candidates[0].content.parts[0].text;
+  
+  try {
+    return JSON.parse(rawJsonOutput.trim());
+  } catch (jsonParseError) {
+    throw new Error(`JSON deserialization exception on generated model schema. Raw output stream: ${rawJsonOutput}`);
   }
 }
 
-async function getGoogleAccessToken(env) {
-  const tokenUrl = "https://oauth2.googleapis.com/token";
-
-  const params = new URLSearchParams({
-    client_id: env.CLIENT_ID.trim(),
-    client_secret: env.CLIENT_SECRET.trim(),
-    refresh_token: env.BLOGGER_REFRESH_TOKEN.trim(),
+/**
+ * Automates token rotation against the authorization server using a persistent refresh token.
+ */
+async function getGoogleAccessToken(clientId, clientSecret, refreshToken) {
+  const oauthTokenUrl = "https://oauth2.googleapis.com/token";
+  
+  const transformationPayload = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    refresh_token: refreshToken,
     grant_type: "refresh_token"
   });
 
-  const response = await fetchWithRetryAndTimeout(tokenUrl, {
+  const response = await fetch(oauthTokenUrl, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded"
-    },
-    body: params.toString()
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: transformationPayload.toString()
   });
 
-  const data = await response.json();
-
   if (!response.ok) {
-    const errorDetails =
-      data.error_description || data.error || response.statusText;
-
-    throw new Error(
-      `Google OAuth Refresh Error [${response.status}]: ${errorDetails}`
-    );
+    const errorFeedback = await response.text();
+    throw new Error(`Google Access Token exchange pipeline failures (Status ${response.status}): ${errorFeedback}`);
   }
 
-  if (
-    !data.access_token ||
-    typeof data.access_token !== "string" ||
-    !data.access_token.trim()
-  ) {
-    throw new Error(
-      "Google OAuth response did not contain a valid access_token"
-    );
+  const credentialSet = await response.json();
+  if (!credentialSet.access_token) {
+    throw new Error("Token server responded successfully but omitted expected access_token key.");
   }
-
-  return data.access_token.trim();
+  
+  return credentialSet.access_token;
 }
 
-async function generateArticleWithGemini(env, userTitle, userPrompt) {
-  const endpoint =
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(
-      env.GEMINI_API_KEY.trim()
-    )}`;
-
-  const systemInstruction = `
-You are a top-tier Indian blogger writing high-quality SEO articles in pure, natural, engaging Hindi.
-
-Follow these rules strictly:
-1. Write like an experienced human content creator—conversational, clear, engaging, and authoritative.
-2. DO NOT use artificial or robotic language, repeated sentences, or cliché AI filler words.
-3. Construct complete, semantic HTML markup for the post body.
-4. ABSOLUTELY NO markdown formatting, NO triple backticks, NO ```html code blocks, NO external CSS, NO JavaScript, NO inline styles, and NO container divs with backgrounds.
-5. Use clean standard Blogger HTML tags only: <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <blockquote>.
-6. The content MUST include a detailed body breakdown with <h2> headings, <p> paragraphs, a dedicated FAQ section (using <h3> for questions and <p> for answers), and a clear Conclusion section.
-7. Return ONLY a single raw JSON object matching the exact schema requested without any markdown wrap or extra commentary.
-`;
-
-  const promptText = `
-User Context Title: ${userTitle ? userTitle.trim() : "N/A"}
-User Prompt Topic: ${userPrompt.trim()}
-
-Generate a complete, comprehensive, highly engaging Hindi post based on this request.
-
-Output MUST be a single raw valid JSON object with the following structure:
-
-{
-  "seoTitle": "Engaging Hindi SEO Title",
-  "metaDescription": "Concise SEO Meta Description in Hindi (max 150 chars)",
-  "customUrl": "english-slug-for-permalink",
-  "labels": ["Label1", "Label2", "Label3"],
-  "contentHtml": "Full article HTML string containing paragraphs, headings, subheadings, bullet points, FAQs, and Conclusion without inline styles or markdown."
-}
-`;
-
-  const payload = {
-    contents: [
-      {
-        role: "user",
-        parts: [
-          { text: systemInstruction },
-          { text: promptText }
-        ]
-      }
-    ],
-    generationConfig: {
-      responseMimeType: "application/json",
-      temperature: 0.7
-    }
-  };
-
-  const response = await fetchWithRetryAndTimeout(endpoint, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(payload)
-  });
-
-  const data = await response.json();
-
-  if (!response.ok) {
-    const msg = data.error?.message || response.statusText;
-
-    throw new Error(`Gemini API Error [${response.status}]: ${msg}`);
-  }
-
-  const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
-
-  if (!rawText || !rawText.trim()) {
-    throw new Error(
-      "Gemini API returned an empty or invalid content candidate"
-    );
-  }
-
-  try {
-    const parsed = JSON.parse(cleanJsonResponse(rawText));
-
-    // Detailed validation of generated JSON structure
-    if (
-      !parsed.seoTitle ||
-      typeof parsed.seoTitle !== "string" ||
-      !parsed.seoTitle.trim()
-    ) {
-      throw new Error(
-        "Gemini response is missing a valid 'seoTitle'"
-      );
-    }
-
-    if (
-      !parsed.metaDescription ||
-      typeof parsed.metaDescription !== "string" ||
-      !parsed.metaDescription.trim()
-    ) {
-      throw new Error(
-        "Gemini response is missing a valid 'metaDescription'"
-      );
-    }
-
-    if (
-      !parsed.contentHtml ||
-      typeof parsed.contentHtml !== "string" ||
-      !parsed.contentHtml.trim()
-    ) {
-      throw new Error(
-        "Gemini response is missing valid 'contentHtml'"
-      );
-    }
-
-    const cleanedHtml = cleanHtmlFormatting(parsed.contentHtml);
-
-    validateHtmlQuality(cleanedHtml);
-
-    // Sanitize custom permalink slug
-    const customUrl = sanitizeSlug(
-      parsed.customUrl || parsed.seoTitle
-    );
-
-    if (!customUrl) {
-      throw new Error(
-        "Failed to generate a valid permalink slug from customUrl or seoTitle"
-      );
-    }
-
-    // Process and deduplicate labels
-    let rawLabels = Array.isArray(parsed.labels) ? parsed.labels : [];
-
-    let cleanLabels = [
-      ...new Set(
-        rawLabels
-          .filter((l) => typeof l === "string" && l.trim().length > 0)
-          .map((l) => l.trim())
-      )
-    ];
-
-    return {
-      seoTitle: parsed.seoTitle.trim(),
-      metaDescription: parsed.metaDescription.trim(),
-      customUrl: customUrl,
-      labels: cleanLabels,
-      contentHtml: cleanedHtml
-    };
-  } catch (e) {
-    throw new Error(
-      `Validation Error on Gemini response: ${e.message}`
-    );
-  }
-}
-
-function cleanJsonResponse(text) {
-  let cleaned = text.trim();
-
-  if (cleaned.startsWith("```json")) {
-    cleaned = cleaned.substring(7);
-  } else if (cleaned.startsWith("```")) {
-    cleaned = cleaned.substring(3);
-  }
-
-  if (cleaned.endsWith("```")) {
-    cleaned = cleaned.substring(0, cleaned.length - 3);
-  }
-
-  return cleaned.trim();
-}
-
-function cleanHtmlFormatting(html) {
-  return html
-    .replace(/```html/gi, "")
-    .replace(/```/g, "")
-    .replace(
-      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
-      ""
-    )
-    .replace(
-      /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi,
-      ""
-    )
-    .replace(/style="[^"]*"/gi, "")
-    .replace(/style='[^']*'/gi, "")
-    .replace(/class="[^"]*"/gi, "")
-    .replace(/class='[^']*'/gi, "")
-    .trim();
-}
-
-function validateHtmlQuality(html) {
-  if (!html || html.length < 100) {
-    throw new Error(
-      "Article HTML content is too short (under 100 characters)"
-    );
-  }
-
-  const lowercaseHtml = html.toLowerCase();
-
-  if (!lowercaseHtml.includes("<h2")) {
-    throw new Error(
-      "Article HTML is missing required '<h2>' headings"
-    );
-  }
-
-  if (!lowercaseHtml.includes("<p>")) {
-    throw new Error(
-      "Article HTML is missing required '<p>' paragraph elements"
-    );
-  }
-
-  const hasFaq =
-    lowercaseHtml.includes("faq") ||
-    lowercaseHtml.includes("सवाल") ||
-    lowercaseHtml.includes("प्रश्नोत्तरी") ||
-    lowercaseHtml.includes("प्रश्न");
-
-  if (!hasFaq) {
-    throw new Error(
-      "Article HTML is missing the mandatory FAQ section"
-    );
-  }
-
-  const hasConclusion =
-    lowercaseHtml.includes("conclusion") ||
-    lowercaseHtml.includes("निष्कर्ष") ||
-    lowercaseHtml.includes("अंतिम शब्द");
-
-  if (!hasConclusion) {
-    throw new Error(
-      "Article HTML is missing the mandatory Conclusion section"
-    );
-  }
-}
-
-function sanitizeSlug(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-}
-
-async function executeBloggerOperation(
-  env,
-  accessToken,
-  article,
-  mode,
-  postId
-) {
-  const blogId = env.BLOG_ID.trim();
-  const isUpdate = mode === "update";
-
-  const endpoint = isUpdate
-    ? `https://www.googleapis.com/blogger/v3/blogs/${encodeURIComponent(
-        blogId
-      )}/posts/${encodeURIComponent(postId.trim())}`
-    : `https://www.googleapis.com/blogger/v3/blogs/${encodeURIComponent(
-        blogId
-      )}/posts?publish=true`;
-
-  const method = isUpdate ? "PUT" : "POST";
-
-  const requestBody = {
+/**
+ * Transmits structural document payload directly to the validated Google Blogger engine.
+ */
+async function publishToBlogger(blogId, accessToken, title, content) {
+  const bloggerEndpoint = `https://www.googleapis.com/blogger/v3/blogs/${blogId}/posts?isDraft=false`;
+  const dynamicPostPayload = {
     kind: "blogger#post",
-    title: article.seoTitle,
-    content: article.contentHtml,
-    labels: article.labels
+    title: title,
+    content: content
   };
 
-  if (article.customUrl && !isUpdate) {
-    requestBody.customUrl = article.customUrl;
-  }
-
-  const response = await fetchWithRetryAndTimeout(endpoint, {
-    method,
+  const response = await fetch(bloggerEndpoint, {
+    method: "POST",
     headers: {
-      Authorization: `Bearer ${accessToken}`,
+      "Authorization": `Bearer ${accessToken}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify(requestBody)
+    body: JSON.stringify(dynamicPostPayload)
   });
 
-  const data = await response.json();
-
   if (!response.ok) {
-    const errorMessage = data.error?.message || response.statusText;
-
-    const details = data.error?.errors
-      ? JSON.stringify(data.error.errors)
-      : "";
-
-    throw new Error(
-      `Blogger API Error [${response.status}]: ${errorMessage} ${details}`.trim()
-    );
+    const apiErrorFeedback = await response.text();
+    throw new Error(`Google Blogger Resource Server rejection (Status ${response.status}): ${apiErrorFeedback}`);
   }
 
-  // Validate Blogger API response payload
-  if (!data.id || typeof data.id !== "string") {
-    throw new Error(
-      "Blogger API returned a response missing a valid 'id'"
-    );
-  }
-
-  if (!data.title || typeof data.title !== "string") {
-    throw new Error(
-      "Blogger API returned a response missing a valid 'title'"
-    );
-  }
-
-  if (!data.url || typeof data.url !== "string") {
-    throw new Error(
-      "Blogger API returned a response missing a valid 'url'"
-    );
-  }
-
-  return {
-    title: data.title,
-    url: data.url,
-    postId: data.id
-  };
+  return await response.json();
 }
