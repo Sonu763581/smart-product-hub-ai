@@ -430,11 +430,11 @@ function cleanHtmlFormatting(html) {
     .replace(/```html/gi, "")
     .replace(/```/g, "")
     .replace(
-      /<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>/gi,
+      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
       ""
     )
     .replace(
-      /<style\b[^<]*(?:(?!</style>)<[^<]*)*</style>/gi,
+      /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi,
       ""
     )
     .replace(/style="[^"]*"/gi, "")
@@ -492,9 +492,9 @@ function validateHtmlQuality(html) {
 function sanitizeSlug(text) {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9s-]/g, "")
+    .replace(/[^a-z0-9\s-]/g, "")
     .trim()
-    .replace(/s+/g, "-")
+    .replace(/\s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
