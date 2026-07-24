@@ -5,7 +5,7 @@ export default {
       return handleCorsPreflight();
     }
 
-   if (request.method !== "POST") {
+    if (request.method !== "POST") {
       return createJsonResponse(
         {
           success: false,
@@ -41,7 +41,7 @@ export default {
       );
     }
 
-if (mode !== "publish" && mode !== "update") {
+    if (mode !== "publish" && mode !== "update") {
       return createJsonResponse(
         {
           success: false,
@@ -102,7 +102,6 @@ if (mode !== "publish" && mode !== "update") {
         },
         200
       );
-
     } catch (error) {
       return createJsonResponse(
         {
@@ -114,6 +113,7 @@ if (mode !== "publish" && mode !== "update") {
     }
   }
 };
+
 function handleCorsPreflight() {
   return new Response(null, {
     status: 204,
@@ -145,7 +145,6 @@ function checkMissingEnvVars(env) {
 
   return missing;
 }
-
 
 function createJsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data), {
@@ -198,7 +197,6 @@ async function fetchWithRetryAndTimeout(
       if (attempt === retries) {
         return response;
       }
-
     } catch (err) {
       clearTimeout(timeoutId);
 
@@ -211,13 +209,15 @@ async function fetchWithRetryAndTimeout(
 
         throw err;
       }
+    }
 
     await new Promise((resolve) =>
       setTimeout(resolve, backoff * Math.pow(2, attempt))
     );
   }
 }
-  async function getGoogleAccessToken(env) {
+
+async function getGoogleAccessToken(env) {
   const tokenUrl = "https://oauth2.googleapis.com/token";
 
   const params = new URLSearchParams({
@@ -258,7 +258,8 @@ async function fetchWithRetryAndTimeout(
 
   return data.access_token.trim();
 }
-  async function generateArticleWithGemini(env, userTitle, userPrompt) {
+
+async function generateArticleWithGemini(env, userTitle, userPrompt) {
   const endpoint =
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${encodeURIComponent(
       env.GEMINI_API_KEY.trim()
@@ -271,7 +272,7 @@ Follow these rules strictly:
 1. Write like an experienced human content creator—conversational, clear, engaging, and authoritative.
 2. DO NOT use artificial or robotic language, repeated sentences, or cliché AI filler words.
 3. Construct complete, semantic HTML markup for the post body.
-4. ABSOLUTELY NO markdown formatting, NO triple backticks, NO \`\`\`html code blocks, NO external CSS, NO JavaScript, NO inline styles, and NO container divs with backgrounds.
+4. ABSOLUTELY NO markdown formatting, NO triple backticks, NO ```html code blocks, NO external CSS, NO JavaScript, NO inline styles, and NO container divs with backgrounds.
 5. Use clean standard Blogger HTML tags only: <h2>, <h3>, <p>, <ul>, <ol>, <li>, <strong>, <em>, <blockquote>.
 6. The content MUST include a detailed body breakdown with <h2> headings, <p> paragraphs, a dedicated FAQ section (using <h3> for questions and <p> for answers), and a clear Conclusion section.
 7. Return ONLY a single raw JSON object matching the exact schema requested without any markdown wrap or extra commentary.
@@ -333,7 +334,8 @@ Output MUST be a single raw valid JSON object with the following structure:
       "Gemini API returned an empty or invalid content candidate"
     );
   }
-      try {
+
+  try {
     const parsed = JSON.parse(cleanJsonResponse(rawText));
 
     // Detailed validation of generated JSON structure
@@ -406,7 +408,8 @@ Output MUST be a single raw valid JSON object with the following structure:
     );
   }
 }
-  function cleanJsonResponse(text) {
+
+function cleanJsonResponse(text) {
   let cleaned = text.trim();
 
   if (cleaned.startsWith("```json")) {
@@ -427,11 +430,11 @@ function cleanHtmlFormatting(html) {
     .replace(/```html/gi, "")
     .replace(/```/g, "")
     .replace(
-      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+      /<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>/gi,
       ""
     )
     .replace(
-      /<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi,
+      /<style\b[^<]*(?:(?!</style>)<[^<]*)*</style>/gi,
       ""
     )
     .replace(/style="[^"]*"/gi, "")
@@ -485,12 +488,13 @@ function validateHtmlQuality(html) {
     );
   }
 }
-  function sanitizeSlug(text) {
+
+function sanitizeSlug(text) {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9\s-]/g, "")
+    .replace(/[^a-z0-9s-]/g, "")
     .trim()
-    .replace(/\s+/g, "-")
+    .replace(/s+/g, "-")
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
@@ -549,7 +553,8 @@ async function executeBloggerOperation(
       `Blogger API Error [${response.status}]: ${errorMessage} ${details}`.trim()
     );
   }
-    // Validate Blogger API response payload
+
+  // Validate Blogger API response payload
   if (!data.id || typeof data.id !== "string") {
     throw new Error(
       "Blogger API returned a response missing a valid 'id'"
