@@ -120,7 +120,7 @@ function validateEnvironment(env) {
  * Commands the Gemini Engine to construct clean semantic structural HTML inside JSON.
  */
 async function generateGeminiArticle(topic, apiKey) {
-  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`;
   
   const instruction = `Write an extensive, professional, SEO-optimized blog article focused on "${topic}". 
   You must output your complete response in raw JSON format exactly following this layout schema structure:
