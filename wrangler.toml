@@ -1,3 +1,28 @@
 name = "patient-cake-fa3c"
 main = "worker.js"
 compatibility_date = "2026-07-22"
+
+[[secrets_store_secrets]]
+binding = "BLOGGER_BLOG_ID"
+store_id = "304553390fcf4f4985fe899402c5d852"
+secret_name = "BLOGGER_BLOG_ID"
+
+[[secrets_store_secrets]]
+binding = "GEMINI_API_KEY"
+store_id = "304553390fcf4f4985fe899402c5d852"
+secret_name = "gemini_api_key"
+
+[[secrets_store_secrets]]
+binding = "GOOGLE_CLIENT_ID"
+store_id = "304553390fcf4f4985fe899402c5d852"
+secret_name = "CLIENT_ID"
+
+[[secrets_store_secrets]]
+binding = "GOOGLE_CLIENT_SECRET"
+store_id = "304553390fcf4f4985fe899402c5d852"
+secret_name = "CLIENT_SECRET"
+
+[[secrets_store_secrets]]
+binding = "GOOGLE_REFRESH_TOKEN"
+store_id = "304553390fcf4f4985fe899402c5d852"
+secret_name = "BLOGGER_REFRESH_TOKEN"
