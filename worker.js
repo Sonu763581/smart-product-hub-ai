@@ -120,6 +120,7 @@ function validateEnvironment(env) {
  * Commands the Gemini Engine to construct clean semantic structural HTML inside JSON.
  */
 async function generateGeminiArticle(topic, apiKey) {
+  console.log("API Key Length:", apiKey.length);
   const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
   
   const instruction = `Write an extensive, professional, SEO-optimized blog article focused on "${topic}". 
