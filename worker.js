@@ -121,8 +121,9 @@ function validateEnvironment(env) {
  */
 async function generateGeminiArticle(topic, apiKey) {
   console.log("API Key Length:", apiKey.length);
+
   const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent";
-  
+
   const instruction = `Write an extensive, professional, SEO-optimized blog article focused on "${topic}". 
   You must output your complete response in raw JSON format exactly following this layout schema structure:
   {
@@ -133,17 +134,19 @@ async function generateGeminiArticle(topic, apiKey) {
   const requestOptions = {
     method: "POST",
     headers: {
-  "Content-Type": "application/json",
-  "X-goog-api-key": apiKey
-},
+      "Content-Type": "application/json",
+      "X-goog-api-key": apiKey
+    },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: instruction }] }],
+      contents: [{ parts: [{ text: instruction } } ],
       generationConfig: {
         responseMimeType: "application/json",
         temperature: 0.7
       }
     })
   };
+
+  throw new Error("API Key Length = " + apiKey.length);
 
   const response = await fetch(endpoint, requestOptions);
   if (!response.ok) {
