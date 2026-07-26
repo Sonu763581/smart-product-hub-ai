@@ -86,15 +86,13 @@ export default {
         }
       );
     }
-
     const requiredEnv = [
-      "GEMINI_API_KEY",
-      "BLOGGER_CLIENT_ID",
-      "BLOGGER_CLIENT_SECRET",
-      "BLOGGER_REFRESH_TOKEN",
-      "BLOG_ID"
-    ];
-
+  "GEMINI_API_KEY",
+  "GOOGLE_CLIENT_ID",
+  "GOOGLE_CLIENT_SECRET",
+  "GOOGLE_REFRESH_TOKEN",
+  "BLOGGER_BLOG_ID"
+];
     const missingEnv = requiredEnv.filter(
       (key) => !env[key]
     );
